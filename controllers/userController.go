@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"github.com/adix/gojwt/database"
-	"github.com/adix/gojwt/helpers"
 	helpers "github.com/adix/gojwt/helpers"
 	"github.com/adix/gojwt/models"
 	"github.com/gin-gonic/gin"
@@ -80,8 +78,9 @@ func Signup() gin.HandlerFunc {
 		user.Created_at, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
 		user.Update_at, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
 		user.ID = primitive.NewObjectID()
-		user.User_id = user.ID.Hex()
-		token, refreshToken, err := helpers.GenerateAllTokens(*user.Email, *user.First_name, *user.Last_name, *user.User_type, *&user.User_id)
+		userID := user.ID.Hex()
+		user.User_id = &userID
+		token, refreshToken, err := helpers.GenerateAllTokens(*user.Email, *user.First_name, *user.Last_name, *user.User_type, *user.User_id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -174,65 +173,38 @@ func GetUsers() gin.HandlerFunc {
 		}
 		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
 
-		//pagination
 		recordPerPage, err := strconv.Atoi(c.Query("recordPerPage"))
 		if err != nil || recordPerPage < 1 {
 			recordPerPage = 10
 		}
-
 		page, err1 := strconv.Atoi(c.Query("page"))
 		if err1 != nil || page < 1 {
 			page = 1
 		}
 
-		//just like skip and limit in nodejs
 		startIndex := (page - 1) * recordPerPage
-
 		startIndex, err = strconv.Atoi(c.Query("startIndex"))
 
 		matchStage := bson.D{{"$match", bson.D{{}}}}
-		groupStage := bson.D{
-			{"$group", bson.D{
-					{"_id", bson.D{
-							{"_id", "null"}, 
-							{"total_count", bson.D{
-								{"$sum", 1}},
-							}, 
-							{"data", bson.D{
-								{"$push", "$$ROOT"}},
-							},
-						},
-					},
-				},
-			},
-		}
+		groupStage := bson.D{{"$group", bson.D{
+			{"_id", bson.D{{"_id", "null"}}},
+			{"total_count", bson.D{{"$sum", 1}}},
+			{"data", bson.D{{"$push", "$$ROOT"}}}}}}
 		projectStage := bson.D{
-			{"$project", {
-				bson.D{
-					{"_id", 0},
-					{"total_count", 1},
-					{"user_items", bson.D{
-						{"$slice", []interface{
-							"$data", startIndex, recordPerPage
-						}},
-					}}
-				}
-			}}
-		}
-		result ,err := userCollection.Aggregate(ctx, mongo.Pipeline{
-			matchStage, groupStage, projectStage
-		})
+			{"$project", bson.D{
+				{"_id", 0},
+				{"total_count", 1},
+				{"user_items", bson.D{{"$slice", []interface{}{"$data", startIndex, recordPerPage}}}}}}}
+		result, err := userCollection.Aggregate(ctx, mongo.Pipeline{
+			matchStage, groupStage, projectStage})
 		defer cancel()
-
-		if err != nil{
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "error occured while listing users"})
-
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "error occured while listing user items"})
 		}
-		var allUsers []bson.M
-
-		if err = result.All(ctx, &allUsers); err != nil{
+		var allusers []bson.M
+		if err = result.All(ctx, &allusers); err != nil {
 			log.Fatal(err)
 		}
-		c.JSON(http.StatusOK, allUsers[0])
+		c.JSON(http.StatusOK, allusers[0])
 	}
 }
